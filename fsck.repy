@@ -1,0 +1,166 @@
+
+#### extract the data from the block
+def _get_block_data(blocknumber):
+  f = openfile('linddata.'+str(blocknumber), True)
+  datastring = f.readat(None, 0)
+  data = deserializedata(datastring)
+  f.close()
+  return data
+ 
+#check whether the device id is 20
+def check_id():
+  sb = _get_block_data(0)
+  if sb['dev_id']!=20:
+      print 'Device ID is NOT correct'
+           
+ 
+#check whether the times are all in the past
+def check_time():
+  sb = _get_block_data(0)
+  if sb['creationTime']>1393630836:
+      print 'creation time is NOT correct' 
+  check_time_helper(26)
+ 
+def check_time_helper(blocknumber):
+  blockdata = _get_block_data(blocknumber)
+  if blockdata['atime']>1393630836 or blockdata['ctime']>1393630836 or blockdata['mtime']>1393630836:
+      print 'The block', blocknumber, 'has wrong time'
+  if 'filename_to_inode_dict' not in blockdata:
+      return 0
+  else:
+      blockdic = blockdata['filename_to_inode_dict']   
+      for item in blockdic:
+          if item!='d..' and item!='d.':
+              check_time_helper(blockdic[item])
+           
+        
+#extract the free block list from the file system
+def get_freeblocklist():
+  flist=[]
+  for i in range(1,26):
+      data = _get_block_data(i)    
+      flist=flist+data
+  flist.sort()
+  return flist
+      
+#check the freeblock list
+def check_freeblock():
+#collect all the free blocks in the file system    
+  fb=range(27,10000)
+  for i in range(27,10000):
+    f = openfile(FILEDATAPREFIX+str(i), True)
+    for j in range(0,4096):
+        data=f.readat(1,j)
+        if data!='\0':
+            fb.remove(i)
+            break
+    f.close()
+  fb.sort()  
+  #extract freeblock list from 1-25 blocks
+  flist = get_freeblocklist()
+  #compare whether two lists contain exactly same elements
+  if flist!=fb:
+    print 'free block list is NOT accurate'    
+ 
+ 
+#check the directory contains . and ..
+def check_dir():
+  root = _get_block_data(26)
+  if 'filename_to_inode_dict' not in root:
+      print 'root dir is Wrong'
+      return 0
+  else:
+      check_dir_helper(26)
+      
+              
+def check_dir_helper(blocknumber):
+  blockdata = _get_block_data(blocknumber)
+  if 'filename_to_inode_dict' not in blockdata:
+      return 0
+  blockdic = blockdata['filename_to_inode_dict']
+  if 'd..' not in blockdic or 'd.'not in blockdic:
+      print 'Block',blocknumber,'does NOT contain . or ..'
+      
+  if blockdic['d.']!=blocknumber:
+      print 'Block',blocknumber,' d. number is NOT correct'
+      
+  parentblock = _get_block_data(blockdic['d..'])
+  if 'filename_to_inode_dict' not in parentblock:
+      print 'Block',blocknumber,' d.. number is NOT correct'
+  else:
+      if blocknumber not in parentblock['filename_to_inode_dict'].values():
+          print 'Block',blocknumber,' d.. number is NOT correct'
+  for item in blockdic:
+      if item!='d..' and item!='d.':
+          check_dir_helper(blockdic[item])
+     
+#check linkcount of each directory
+def check_link():
+  check_link_helper(26)  
+                          
+def check_link_helper(blocknumber):
+  blockdata = _get_block_data(blocknumber)
+  if 'filename_to_inode_dict' not in blockdata:
+      return 0
+  blockdic = blockdata['filename_to_inode_dict']   
+  if blockdata['linkcount']!=len(blockdic):
+      print 'Block',blocknumber,'has the wrong number of links' 
+  for item in blockdic:
+      if item!='d..' and item!='d.':
+          check_link_helper(blockdic[item])
+      
+ 
+#check the indirect number
+def check_indirect():
+  check_indirect(26)
+  
+def check_indirect_helper(blocknumber):
+  blockdata = _get_block_data(blocknumber)
+  if 'filename_to_inode_dict' in blockdata:
+      blockdic=blockdata['filename_to_inode_dict']  
+      for item in blockdic:
+          if item!='d..' and item!='d.':
+              check_indirect_helper(blockdic[item])
+  else:
+       lblock = _get_block_data(blockdata['location'])
+       try:
+           if len(lblock)>1 and blockdata['indirect']!=1:
+               print 'Block',blocknumber,'has the wrong indirect'
+       except TypeError:  
+           if blockdata['indirect']!=0:  
+               print 'Block',blocknumber,'has the wrong indirect'
+      
+#check whether size is valid 
+def check_size():  
+  check_size_helper(26)
+    
+def check_size_helper(blocknumber):       
+  blockdata = _get_block_data(blocknumber)
+  if 'filename_to_inode_dict' in blockdata:
+      blockdic=blockdata['filename_to_inode_dict']  
+      for item in blockdic:
+          if item!='d..' and item!='d.':
+              check_size_helper(blockdic[item])
+  else:
+       if blockdata['indirect']==0:
+           if blockdata['size']>4096:
+               print 'Block',blocknumber,'has INVALID size'
+           if blockdata['size']<0:
+               print 'Block',blocknumber,'has INVALID size'  
+       else:
+           lblock = _get_block_data(blockdata['location'])
+           length = len(lblock)
+           if blockdata['size']>4096*length or blockdata['size']<4096*(length-1):
+               print 'Block',blocknumber,'has INVALID size'
+           
+##The checker :
+ 
+print "If no error message showing up, your system is fine !" 
+print "These are the error messages for the file system: "     
+check_id()
+check_time()
+check_freeblock()
+check_dir()
+check_link()
+check_indirect()
+check_size() 
